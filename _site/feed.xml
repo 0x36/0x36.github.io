@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.3.1">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2022-11-16T13:24:03+04:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">0x36.github.io</title><subtitle></subtitle><entry><title type="html">CVE-2022-32932: ZinComputeProgramUpdateMutables() OOB write due to double fetch issue</title><link href="http://localhost:4000/CVE-2022-32932/" rel="alternate" type="text/html" title="CVE-2022-32932: ZinComputeProgramUpdateMutables() OOB write due to double fetch issue" /><published>2022-11-15T00:00:00+04:00</published><updated>2022-11-15T00:00:00+04:00</updated><id>http://localhost:4000/oob-double-fetch</id><content type="html" xml:base="http://localhost:4000/CVE-2022-32932/"><![CDATA[<h2 id="analysis">Analysis:</h2>
+
+<hr />
+<p><code class="language-plaintext highlighter-rouge">H11ANEIn::patchMutableSurface()</code> (reachable from <code class="language-plaintext highlighter-rouge">H11ANEIn::ANE_ProgramSendRequest_gated</code>) is called if the <code class="language-plaintext highlighter-rouge">model.hwx</code> has a mutable procedure and has also <em>initInfo</em> section, I looked for such a model but couldn’t find any, so I ended up patching one of the pre-compiled models and used CVE-2022-32845 to load it. Please keep in mind that CVE-2022-32845 is not required to reach the vulnerable code path from the default app sandbox, it is sufficient to compile a custom mlmodel to achieve the same results.
+You can find more details about CVE-2022-32845 in my <a href="https://github.com/0x36/weightBufs/blob/main/attacking_ane_poc2022.pdf">presentation slides</a>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">ZinComputeProgramUpdateMutables()</code> is another function that’s called by <code class="language-plaintext highlighter-rouge">H11ANEIn::patchMutableSurface()</code> and the function prototype is the following:</p>
+<pre><code class="language-C">ZinComputeProgramStatus __cdecl ZinComputeProgramUpdateMutables(
+        uint64_t procedureId,
+        const ZinComputeProgramInitInfo *init_info,
+        const ANECMutableProcedureInfo *mutable_procedure_info,
+        uint64_t mut_procedure_info_size,
+        void *MUTK_kernel_section,
+        uint64_t MUTK_kernel_section_size);
+</code></pre>
+
+<ul>
+  <li><strong>init_info</strong>: is the <code class="language-plaintext highlighter-rouge">initInfo</code> section that contains a serialized input, you can find the serializer function <a href="https://github.com/0x36/weightBufs/blob/main/exploit/exploit.m#L644">serialize_initinfo_section()</a> in <code class="language-plaintext highlighter-rouge">weightBufs</code> exploit source code.</li>
+  <li><strong>mutable_procedure_info</strong> : is a shared IOSurface buffer provided by the attacker, it’s also called <strong>weightsBuffer</strong> in <code class="language-plaintext highlighter-rouge">weightBufs</code> exploit.</li>
+  <li><strong>mut_procedure_info_size</strong>: It denotes the size of the <strong>mutable_procedure_info</strong> surface buffer.</li>
+  <li><strong>MUTK_kernel_section</strong>: (or <code class="language-plaintext highlighter-rouge">MUTK</code>) It’s a mapping buffer of an IOSurface object that’s created by the kernel during program loading phase.</li>
+  <li><strong>MUTK_kernel_section_size</strong>:  is the size of the mutable kernel section.</li>
+</ul>
+
+<p><img src="/img/double_fetch/image1.png" alt="Untitled" /></p>
+
+<p>The loop <strong>88-92</strong> calculates the <code class="language-plaintext highlighter-rouge">MutableWeight</code> object count within the <strong>mutable_procedure_info</strong> object, then calculates the allocation size of the <code class="language-plaintext highlighter-rouge">MutableWeight</code> array at <strong>93</strong>. 
+After that, the <code class="language-plaintext highlighter-rouge">ANECMutableWeight</code> array of objects is allocated at <strong>100</strong>, then populated with the appropriate weight buffer/size pair in the loop <strong>111-127</strong> by <code class="language-plaintext highlighter-rouge">ANECGetMutableWeight()</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">ANECGetMutableOperationInfo()</code> returns an object <code class="language-plaintext highlighter-rouge">opsInfo</code> from our shared memory:</p>
+<pre><code class="language-C">opsInfo *__fastcall ANECGetMutableOperationInfo(const ANECMutableProcedureInfo *MutableProcedureInfo, unsigned int id)
+{
+  unsigned int weight_buffer_size; // w8
+  opsInfo *opInfo; // x0
+
+  weight_buffer_size = MutableProcedureInfo-&gt;header.weight_buffer_size;
+  if ( !weight_buffer_size )
+    return 0LL;
+  opInfo = (opsInfo *)((char *)MutableProcedureInfo + MutableProcedureInfo-&gt;wb_offsets[id]);
+  while ( opInfo-&gt;op_index != id )
+  {
+    if ( !--weight_buffer_size )
+      return 0LL;
+  }
+  return opInfo;
+}
+
+</code></pre>
+
+<p>The <code class="language-plaintext highlighter-rouge">ANECGetMutableWeight</code> pseudo-code is the following:</p>
+<pre><code class="language-C">void __fastcall ANECGetMutableWeight(
+        const ANECMutableProcedureInfo *procedure_info,
+        weightInfo *a2,
+        ANECMutableWeight *a3)
+{
+  uint64_t wi_size; // x9
+
+  wi_size = a2-&gt;wi_size;
+  a3-&gt;_weightBuf = (char *)procedure_info + a2-&gt;wi_off;
+  a3-&gt;_weightBufSize = wi_size;
+}
+</code></pre>
+
+<p>The <code class="language-plaintext highlighter-rouge">ANECGetMutableWeightInfo</code> pseudo-code is the following:</p>
+<pre><code class="language-C">weightInfo *__fastcall ANECGetMutableWeightInfo(
+        const ANECMutableProcedureInfo *MutableProcedureInfo,
+        opsInfo *a2,
+        unsigned int a3)
+{
+  if ( a2-&gt;op_count &lt;= a3 )
+    return 0LL;
+  else
+    return (weightInfo *)((char *)MutableProcedureInfo + a2-&gt;op_offsets[a3]);
+}
+</code></pre>
+<p>I already described the format of the <code class="language-plaintext highlighter-rouge">ANECMutableProcedureInfo</code> in <a href="https://github.com/0x36/weightBufs/blob/main/attacking_ane_poc2022.pdf">“Attacking Apple’s Neural Engine” slides</a>, so feel free to read it if you haven’t already. The structure definition can be found in weightBufs exploit at <a href="https://github.com/0x36/weightBufs/blob/main/exploit/aneProgram.h#L190">‘aneProgram.h’</a>.</p>
+
+<h2 id="vulnerability">Vulnerability:</h2>
+<hr />
+
+<p>If you’ve noticed, <code class="language-plaintext highlighter-rouge">ANECGetMutableOperationInfo()-&gt;op_count</code> is fetched twice: once to calculate the size in order to allocate the <code class="language-plaintext highlighter-rouge">ANECMutableWeight</code> array, and once to populate this array.</p>
+
+<p>Because the <strong>mutable_procedure_info</strong> buffer is a shared memory, an attacker <strong>could use a separate thread to change the value of <code class="language-plaintext highlighter-rouge">opsInfo-&gt;op_count</code> between the first and the second usages</strong>, resulting in a size mismatch that will lead to an interesting OOB write in either a kalloc var zone, kheap defaul or the kernel map.</p>
+
+<p>The vulnerability can be used in many interesting ways. For example, an attacker could set <code class="language-plaintext highlighter-rouge">total_count = 0x1000;</code> at line <strong>93</strong>, then increase <code class="language-plaintext highlighter-rouge">opsInfo-&gt;count</code> to something larger, causing data to be copied out of bounds at <code class="language-plaintext highlighter-rouge">ANECGetMutableWeight()</code> .</p>
+
+<p>The kernel will panic at the instruction shown below if the OOB write has reached an unmapped memory area:</p>
+
+<pre><code class="language-txt">com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D08                 EXPORT _ANECGetMutableWeight
+com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D08 _ANECGetMutableWeight                   ; CODE XREF: _ZinComputeProgramUpdateMutables+270↓p
+com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D08                 LDP             X8, X9, [X1,#8]
+com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D0C                 ADD             X8, X0, X8
+com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D10                 STP             X8, X9, [X2] // &lt;---- Kernel panic 
+com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D14                 RET
+</code></pre>
+
+<p>This bug provides a strong primitive in that it writes two 64-bit values: a kernel address pointing to our user shared buffer and a (semi-)arbitrary 64-bit value.</p>
+
+<h2 id="proof-of-concept">Proof-Of-Concept:</h2>
+<p>The proof-of-concept is left as an exercise for the reader. However, <code class="language-plaintext highlighter-rouge">weightBufs</code> exploit includes everything required to reach the vulenrable code path. Good Luck :-).</p>]]></content><author><name></name></author><category term="iOS" /><summary type="html"><![CDATA[Analysis:]]></summary></entry></feed>
