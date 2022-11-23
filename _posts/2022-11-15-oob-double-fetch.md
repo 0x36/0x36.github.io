@@ -112,4 +112,4 @@ com.apple.driver.AppleH11ANEInterface:__text:FFFFFE0008913D14                 RE
 This bug provides a strong primitive in that it writes two 64-bit values: a kernel address pointing to our user shared buffer and a (semi-)arbitrary 64-bit value.
 
 ## Proof-Of-Concept:
-The proof-of-concept is left as an exercise for the reader. However, `weightBufs` exploit includes everything required to reach the vulenrable code path. Good Luck :-).
+The proof-of-concept is left as an exercise for the reader. However, `weightBufs` exploit includes everything required to reach the vulnerable code path. Good Luck :-).
