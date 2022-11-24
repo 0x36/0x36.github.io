@@ -4,6 +4,7 @@ title:  "CVE-2022-32932: ZinComputeProgramUpdateMutables() OOB write due to doub
 categories: iOS
 permalink: "/CVE-2022-32932/"
 list_title: ' '
+author: Mohamed GHANNAM (@_simo36)
 ---
 
 ## Analysis:
@@ -13,7 +14,7 @@ list_title: ' '
 You can find more details about CVE-2022-32845 in my [presentation slides](https://github.com/0x36/weightBufs/blob/main/attacking_ane_poc2022.pdf).
 
 `ZinComputeProgramUpdateMutables()` is another function that's called by `H11ANEIn::patchMutableSurface()` and the function prototype is the following:
-```C
+```c
 ZinComputeProgramStatus __cdecl ZinComputeProgramUpdateMutables(
         uint64_t procedureId,
         const ZinComputeProgramInitInfo *init_info,
@@ -38,7 +39,7 @@ After that, the `ANECMutableWeight` array of objects is allocated at **100**, th
 
 
 `ANECGetMutableOperationInfo()` returns an object `opsInfo` from our shared memory: 
-```C
+```c
 opsInfo *__fastcall ANECGetMutableOperationInfo(const ANECMutableProcedureInfo *MutableProcedureInfo, unsigned int id)
 {
   unsigned int weight_buffer_size; // w8
@@ -59,7 +60,7 @@ opsInfo *__fastcall ANECGetMutableOperationInfo(const ANECMutableProcedureInfo *
 ```
 
 The `ANECGetMutableWeight` pseudo-code is the following:
-```C
+```c
 void __fastcall ANECGetMutableWeight(
         const ANECMutableProcedureInfo *procedure_info,
         weightInfo *a2,
@@ -75,7 +76,7 @@ void __fastcall ANECGetMutableWeight(
 
 
 The `ANECGetMutableWeightInfo` pseudo-code is the following:
-```C
+```c
 weightInfo *__fastcall ANECGetMutableWeightInfo(
         const ANECMutableProcedureInfo *MutableProcedureInfo,
         opsInfo *a2,
