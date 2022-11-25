@@ -30,7 +30,7 @@ The `planes` array is a stack variable located in `H11ANEIn::ANE_ProgramCreate_g
 Obviously, overflowing the `planes` array with too much entries would likely overwrite the stack cookie as well as the saved old stack frame pointer, resulting in a kernel panic. Fortunately, the total number of planes is entirely within the control of the given model, thus we could corrupt several stack variables without affecting those sensitive areas of the stack.
 
 
-## Turning the memory corruption to heap overflow:
+### Turning the memory corruption to heap overflow:
 Another interesting scenario, and as illustrated in the image below, it is possible to overflow two heap objects: `H11ANEProgramBindingInfo` (at line 528) and `H11ANEProgramCreateArgsStructOutput` (at line 533).
 
 ![Untitled](/img/CVE-2022-32898/image2.png)
